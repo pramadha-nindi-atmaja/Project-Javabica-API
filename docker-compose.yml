@@ -1,0 +1,59 @@
+version: '3.7'
+
+networks:
+  attention-local-network:
+    driver: bridge
+#postgres
+services:
+  dbpostgres:
+      container_name: attention-database-postgres
+      image: postgres:13.7
+      ports:
+        - 5432:5432
+      networks:
+        - attention-local-network
+      volumes:
+        - /etc/docker-container/postgres-volume:/var/lib/postgresql/data
+      environment:
+        - POSTGRES_PASSWORD=root
+      deploy:
+        resources:
+          limits:
+            cpus: '1'
+            memory: 100M
+          reservations:
+            cpus: '1'
+            memory: 100M
+  nginx:
+    image: nginx:alpine
+    container_name: attention-nginx
+    restart: unless-stopped
+    ports:
+      - 8000:80
+    volumes:
+      - ./:/var/www/html
+      - /etc/docker-container/nginx/volume:/etc/nginx/conf.d/
+      - /etc/docker-container/nginx/logs:/var/logs/nginx:rw
+    depends_on:
+      - php
+      - postgres
+    networks:
+      - attention-local-network
+  php:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: php
+    volumes:
+      - ./:var/www/html
+    ports:
+      -"9001":9000"
+    networks:
+      - attention-local-network
+  apps:
+    build: 
+      args:
+        - name=value
+
+
+
