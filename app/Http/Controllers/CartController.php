@@ -4,44 +4,66 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\CartRequest\CreateCartRequest;
 use App\Services\Cart\CheckingCartPerItemWithSummaryGroupingService;
-use Illuminate\Http\Request;
 
 class CartController extends BaseController
 {
-   /**
+    /**
      * @lrd:start
-     * # contoh format request untuk upsert
-     * # ubah kutip nya menjadi kutip string
+     * # Example request format for upsert
+     * Replace single quotes with double quotes.
      * =============
-    * 
-    
-    *         {
-    *            "data": [
-    *            {
-    *            "variant_id":1,
-    *            "qty":12,
-    *            "note":"note"
-    *            },
-    *            {
-    *             "variant_id":1,
-    *            "qty":10,
-    *              "note":"note"
-    *            }
-    *            ]
-    *            }
-    * =============
-    * akhir dari format upsert
-    * @lrd:end
-    */
-    public function create(CreateCartRequest $request,CheckingCartPerItemWithSummaryGroupingService $checkingCartPerItemWithSummaryGroupingService) 
-    {
-        
-        $checkingdata = $checkingCartPerItemWithSummaryGroupingService->groupingPerItem($request->data);
+     * {
+     *    "data": [
+     *      {
+     *        "variant_id": 1,
+     *        "qty": 12,
+     *        "note": "note"
+     *      },
+     *      {
+     *        "variant_id": 1,
+     *        "qty": 10,
+     *        "note": "note"
+     *      }
+     *    ]
+     * }
+     * =============
+     * End of upsert format example.
+     * @lrd:end
+     */
+    public function create(
+        CreateCartRequest $request,
+        CheckingCartPerItemWithSummaryGroupingService $checkingCartPerItemWithSummaryGroupingService
+    ) {
+        $validatedData = $request->validated();
 
-        if($checkingdata['arrayStatus'] == true) {
+        // Process and group cart items
+        $checkingData = $checkingCartPerItemWithSummaryGroupingService->groupingPerItem($validatedData['data']);
 
-            return $this->handleResponse($checkingdata['arrayResponse'],'cart success',$request->all(),str_replace('/','.',$request->path()),201);
+        // Handle successful grouping
+        if ($checkingData['arrayStatus'] === true) {
+            return $this->handleResponse(
+                $checkingData['arrayResponse'],
+                'Cart processed successfully',
+                $validatedData,
+                str_replace('/', '.', $request->path()),
+                201
+            );
         }
 
+        // Handle error case
+        $errorData = [
+            [
+                'field' => 'create-cart',
+                'message' => 'Error when processing cart data',
+            ],
+        ];
+
+        return $this->handleError(
+            $errorData,
+            $checkingData['arrayMessage'] ?? 'Cart processing failed',
+            $validatedData,
+            str_replace('/', '.', $request->path()),
+            422
+        );
     }
 }
