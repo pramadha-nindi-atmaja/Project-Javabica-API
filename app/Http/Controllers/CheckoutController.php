@@ -18,193 +18,169 @@ use App\Services\RajaOngkir\CostServices;
 use App\Services\RajaOngkir\CourierFinderServices;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
+
 class CheckoutController extends BaseController
 {
-   
+    private CheckingCartPerItemWithSummaryGroupingService $checkingCartService;
 
-    private $checkingCartPerItemWithSummaryGroupingService;
-
-
-    public function __construct(CheckingCartPerItemWithSummaryGroupingService $checkingCartPerItemWithSummaryGroupingService)
+    public function __construct(CheckingCartPerItemWithSummaryGroupingService $checkingCartService)
     {
-        $this->checkingCartPerItemWithSummaryGroupingService            = $checkingCartPerItemWithSummaryGroupingService;
+        $this->checkingCartService = $checkingCartService;
     }
-     /**
+
+    /**
      * @lrd:start
-     * # contoh format request untuk upsert
-     * # ubah kutip nya menjadi kutip string
+     * # Example request format for checkout
+     * Replace single quotes with double quotes.
      * =============
-   *{
-    * "data": {
-    *     "shipping": {
-    *         "address_id": 1
-    *     },
-    *    "billing": {
-    *         "address_id": 1,
-    *         "same_as_shipping": 1
-    *     },
-    *     "courier": {
-    *         "agent":"jne",
-    *         "service":"sam day",
-    *         "price":13000,
-    *        "etd":"4-5"
-    *   },
-    *  "product": [{
-    *         "variant_id": 1,
-    *        "qty": "asd",
-    *       "note":""
-    *   },
-    *  {
-    *     "variant_id": 1,
-    *    "qty": "asd",
-     *       "note":""
-    *        }
-    *    ]
-
-    * }
-    *}
-    * =============
-    * akhir dari format upsert
-    * @lrd:end
-    */
+     * {
+     *   "data": {
+     *     "shipping": { "address_id": 1 },
+     *     "billing": { "address_id": 1, "same_as_shipping": 1 },
+     *     "courier": {
+     *       "agent": "jne",
+     *       "service": "sam day",
+     *       "price": 13000,
+     *       "etd": "4-5"
+     *     },
+     *     "product": [
+     *       { "variant_id": 1, "qty": 2, "note": "" },
+     *       { "variant_id": 2, "qty": 1, "note": "" }
+     *     ],
+     *     "voucher": 1
+     *   }
+     * }
+     * =============
+     * End of example.
+     * @lrd:end
+     */
     public function create(
-    CheckoutCreateRequest $request,
-    CostServices $costService,
-    CourierFinderServices $courierFinderService,
-    OrderInterface $orderInterface,
-    OrderNumberGeneratorService $orderNumberGenerator,
-    CreateSnapTokenService $createSnapTokenService,
-    OrderCalculationService $orderCalculationService,
-    OrderReduceStockServices $orderReduceStockServices
+        CheckoutCreateRequest $request,
+        CostServices $costService,
+        CourierFinderServices $courierFinderService,
+        OrderInterface $orderInterface,
+        OrderNumberGeneratorService $orderNumberGenerator,
+        CreateSnapTokenService $createSnapTokenService,
+        OrderCalculationService $orderCalculationService,
+        OrderReduceStockServices $orderReduceStockServices
+    ) {
+        $validated = $request->validated();
+        $data = $validated['data'];
 
-    ) 
-    {
-        if($request->data['billing']['same_as_shipping'] == true)
-        {
-            $billingId     =  $request->data['shipping']['address_id'];
-        }
-        else
-        {
-            $billingId     =  $request->data['billing']['address_id'];
-        }
-        
-       $shippingId    =  $request->data['shipping']['address_id'];
-       $productOrder  =  $request->data['product'];
-       $courier       =  $request->data['courier'];
-       $voucher       =  $request->data['voucher'];
-       //checking product stock and price
-        
-        $getVoucher = Voucher::where('id', $voucher)->first();
+        $billingId  = $data['billing']['same_as_shipping'] ? $data['shipping']['address_id'] : $data['billing']['address_id'];
+        $shippingId = $data['shipping']['address_id'];
+        $productOrder = $data['product'];
+        $courier = $data['courier'];
+        $voucherId = $data['voucher'] ?? null;
 
-       $checkingdata =  $this->checkingCart($productOrder);
-      
-        if($checkingdata['arrayStatus'] == false && $checkingdata['arrayResponse']['out_of_stock'] >= 1)
-        {
-            return   $this->handleError($checkingdata['arrayResponse'],'there is item out of stock, please let customer know',$request->all(),str_replace('/','.',$request->path()),422);
-        }
-        if($checkingdata['arrayStatus'] == false && $checkingdata['arrayResponse']['cart'] <= 0)
-        {
-            return   $this->handleError($checkingdata['arrayResponse'],'cart is empty please input some product',$request->all(),str_replace('/','.',$request->path()),422);
-        }
-       
-
-        //checking price raja ongkir
-
-        $checkAddress = User_shipping_address::where('id',$shippingId)->where('fk_user_id',Auth::user()->id)->first();
-     
-        if($checkAddress != true)
-        {
-            $data  = array([
-                'field'      =>'shipping address',
-                'message'    => 'shipping address not found, please try other address'
-            ]);
-
-            return   $this->handleError($data,'shipping address not found',$request->all(),str_replace('/','.',$request->path()),422);
+        // Validate stock and cart
+        $checkingData = $this->checkingCart($productOrder);
+        if ($checkingData['arrayStatus'] === false) {
+            return $this->handleError(
+                $checkingData['arrayResponse'],
+                'Invalid cart data',
+                $validated,
+                str_replace('/', '.', $request->path()),
+                422
+            );
         }
 
-        //billing address checking
+        // Check shipping address
+        $shippingAddress = User_shipping_address::where('id', $shippingId)
+            ->where('fk_user_id', Auth::id())
+            ->first();
 
-        $billingAddress = User_shipping_address::where('id',$billingId)->where('fk_user_id',Auth::user()->id)->first();
-     
-        if($billingAddress != true)
-        {
-            $data  = array([
-                'field'      =>'billing address',
-                'message'    => 'billing address not found, please try other address'
-            ]);
-
-            return   $this->handleError($data,'billing address not found',$request->all(),str_replace('/','.',$request->path()),422);
-        }
-       
-        //checking courier 
-
-         $data = array(
-                'origin'         => config('rajaongkir.originCity'),
-                'destination'    => $checkAddress['city'],
-                'weight'         => $checkingdata['arrayResponse']['calculation']['total_weight'],
-                'courier'        => $courier['agent']
-        );
-        $checkCost = $costService->getCost($data);
-      
-        if($checkCost['arrayStatus'] == false)
-        {
-            $data  = array([
-                'field'      =>'raja-ongkir-message',
-                'message'    => $checkCost['arrayResponse']['response']['rajaongkir']['status']['description']
-            ]);
-
-            return   $this->handleError($data,'courier fail',$request->all(),str_replace('/','.',$request->path()),422);
+        if (!$shippingAddress) {
+            return $this->handleError(
+                [['field' => 'shipping_address', 'message' => 'Shipping address not found']],
+                'Shipping address not found',
+                $validated,
+                str_replace('/', '.', $request->path()),
+                422
+            );
         }
 
-        //cost courier finder  
+        // Check billing address
+        $billingAddress = User_shipping_address::where('id', $billingId)
+            ->where('fk_user_id', Auth::id())
+            ->first();
 
-        $findCourier =  $courierFinderService->courierCostFinder($checkCost['arrayResponse'][0]['costs'],$courier);
-      
-        if($findCourier['arrayStatus'] != true)
-        {
-            $data  = array([
-                'field'      =>'courier find fail',
-                'message'    => 'please input right cost shipping'
-            ]);
-
-            return   $this->handleError($data,'cost courier shipping fail',$request->all(),str_replace('/','.',$request->path()),422);
+        if (!$billingAddress) {
+            return $this->handleError(
+                [['field' => 'billing_address', 'message' => 'Billing address not found']],
+                'Billing address not found',
+                $validated,
+                str_replace('/', '.', $request->path()),
+                422
+            );
         }
 
-        //setelah semua koneksi external berjalan dengan baik maka lakukan pengecekan akhir dan reduce cost
-        $checkingdata =  $this->checkingCart($productOrder);
+        // Check courier cost via RajaOngkir
+        $costPayload = [
+            'origin'      => config('rajaongkir.originCity'),
+            'destination' => $shippingAddress->city,
+            'weight'      => $checkingData['arrayResponse']['calculation']['total_weight'],
+            'courier'     => $courier['agent'],
+        ];
 
-        if($checkingdata['arrayStatus'] == false && $checkingdata['arrayResponse']['out_of_stock'] >= 1)
-        {
-            return   $this->handleError($checkingdata['arrayResponse'],'there is item out of stock, please let customer know',$request->all(),str_replace('/','.',$request->path()),422);
+        $costResult = $costService->getCost($costPayload);
+        if ($costResult['arrayStatus'] === false) {
+            $message = $costResult['arrayResponse']['response']['rajaongkir']['status']['description'] ?? 'Courier service failed';
+            return $this->handleError(
+                [['field' => 'rajaongkir', 'message' => $message]],
+                'Courier cost check failed',
+                $validated,
+                str_replace('/', '.', $request->path()),
+                422
+            );
         }
-        if($checkingdata['arrayStatus'] == false && $checkingdata['arrayResponse']['cart'] <= 0)
-        {
-            return   $this->handleError($checkingdata['arrayResponse'],'cart is empty please input some product',$request->all(),str_replace('/','.',$request->path()),422);
-        }
-        // reduce stock from variant
-        $orderReduceStockServices->reduceStock($checkingdata['arrayResponse']['cart']);
 
-       // store in order table
-        $getOrderNumber = $orderNumberGenerator->generate();
-    
-        $payloadOrder = array(
-            'queue_number'               => $getOrderNumber['arrayResponse']['queue_number'],
-            'order_number'               => $getOrderNumber['arrayResponse']['invoice_number'],
-            'uuid'                       => Str::uuid().'-'.date('Ymd-His'),
-            
+        // Find matching courier service
+        $foundCourier = $courierFinderService->courierCostFinder($costResult['arrayResponse'][0]['costs'], $courier);
+        if ($foundCourier['arrayStatus'] !== true) {
+            return $this->handleError(
+                [['field' => 'courier', 'message' => 'Invalid courier cost input']],
+                'Courier validation failed',
+                $validated,
+                str_replace('/', '.', $request->path()),
+                422
+            );
+        }
+
+        // Double-check stock before reducing
+        $recheck = $this->checkingCart($productOrder);
+        if ($recheck['arrayStatus'] === false) {
+            return $this->handleError(
+                $recheck['arrayResponse'],
+                'Cart validation failed',
+                $validated,
+                str_replace('/', '.', $request->path()),
+                422
+            );
+        }
+
+        // Reduce stock
+        $orderReduceStockServices->reduceStock($recheck['arrayResponse']['cart']);
+
+        // Generate order number
+        $orderNumber = $orderNumberGenerator->generate();
+
+        // Build order payload
+        $payloadOrder = [
+            'queue_number'               => $orderNumber['arrayResponse']['queue_number'],
+            'order_number'               => $orderNumber['arrayResponse']['invoice_number'],
+            'uuid'                       => Str::uuid() . '-' . date('Ymd-His'),
             'contact_email'              => Auth::user()->email,
-            
             'shipping_country'           => 'Indonesia',
-            'contact_phone'              => $checkAddress->phone_number,
-            'shipping_first_name'        => $checkAddress->first_name,
-            'shipping_last_name'         => $checkAddress->last_name,
-            'shipping_address'           => $checkAddress->address,
-            'shipping_city'              => $checkAddress->city_label,
-            'shipping_province'          => $checkAddress->province_label,
-            'shipping_postal_code'       => $checkAddress->postal_code,
-            'shipping_label_place'       => $checkAddress->label_place,
-            'shipping_note_address'      => $checkAddress->courier_note,
-
+            'contact_phone'              => $shippingAddress->phone_number,
+            'shipping_first_name'        => $shippingAddress->first_name,
+            'shipping_last_name'         => $shippingAddress->last_name,
+            'shipping_address'           => $shippingAddress->address,
+            'shipping_city'              => $shippingAddress->city_label,
+            'shipping_province'          => $shippingAddress->province_label,
+            'shipping_postal_code'       => $shippingAddress->postal_code,
+            'shipping_label_place'       => $shippingAddress->label_place,
+            'shipping_note_address'      => $shippingAddress->courier_note,
             'billing_country'            => 'Indonesia',
             'contact_billing_phone'      => $billingAddress->phone_number,
             'billing_first_name'         => $billingAddress->first_name,
@@ -215,188 +191,164 @@ class CheckoutController extends BaseController
             'billing_postal_code'        => $billingAddress->postal_code,
             'billing_label_place'        => $billingAddress->label_place,
             'billing_note_address'       => $billingAddress->courier_note,
+            'courier_agent'              => $courier['agent'],
+            'courier_agent_service'      => $foundCourier['arrayResponse'][0]['service'],
+            'courier_agent_service_desc' => $foundCourier['arrayResponse'][0]['description'],
+            'courier_estimate_delivered' => $foundCourier['arrayResponse'][0]['cost'][0]['etd'],
+            'courier_resi_number'        => '',
+            'courier_cost'               => $foundCourier['arrayResponse'][0]['cost'][0]['value'],
+            'payment_method'             => 'Midtrans',
+            'payment_refrence_code'      => '',
+            'invoice_note'               => config('javabica.invoice_note'),
+            'delivery_order_note'        => config('javabica.delivery_order_note'),
+            'fk_user_id'                 => Auth::id(),
+            'fk_voucher_id'              => $voucherId,
+            'payment_status'             => 'UNPAID',
+            'status'                     => 'ORDER',
+        ];
 
-            'courier_agent'              =>$courier['agent'],
-            'courier_agent_service'      =>$findCourier['arrayResponse'][0]['service'],
-            'courier_agent_service_desc' =>$findCourier['arrayResponse'][0]['description'],
-            'courier_estimate_delivered' =>$findCourier['arrayResponse'][0]['cost'][0]['etd'],
-            'courier_resi_number'        =>'',
-            'courier_cost'               =>$findCourier['arrayResponse'][0]['cost'][0]['value'],
-            
-            'payment_method'             =>'Midtrans',
-            'payment_refrence_code'      =>'',
-
-            'invoice_note'               => ''.config('javabica.invoice_note').'',
-            'delivery_order_note'        => ''.config('javabica.delivery_order_note').'',
-
-            'fk_user_id'                 => Auth::user()->id,
-
-            'fk_voucher_id'              => $voucher,
-
-            'payment_status'             =>'UNPAID',
-            'status'                     =>'ORDER'
-        );
-
-        $insert  =  $orderInterface->store($payloadOrder,'show_all');
-
-        if($voucher != NULL){
-            $historyVoucher = new HistoryVoucher();
-            $historyVoucher->voucher_id = $voucher;
-            $historyVoucher->user_id = Auth::user()->id;
-            $historyVoucher->order_id = $insert['queryResponse']['data']['id'];
-            $historyVoucher->save();
+        $insert = $orderInterface->store($payloadOrder, 'show_all');
+        if ($insert['queryStatus'] !== true) {
+            return $this->handleError(
+                [['field' => 'order', 'message' => 'Order creation failed']],
+                'Order insertion failed',
+                $validated,
+                str_replace('/', '.', $request->path()),
+                422
+            );
         }
-        
-        if($insert['queryStatus'] != true)
-        {
-            $data  = array([
-                'field'      =>'error when insert order',
-                'message'    => 'please call our admin'
+
+        // Save voucher history if applied
+        if ($voucherId) {
+            HistoryVoucher::create([
+                'voucher_id' => $voucherId,
+                'user_id'    => Auth::id(),
+                'order_id'   => $insert['queryResponse']['data']['id'],
             ]);
-
-            return   $this->handleError($data,'insert order fail',$request->all(),str_replace('/','.',$request->path()),422);
-        }
-    
-    
-        $transformCart        = [];
-        $transformforMidtrans = [];
-
-        foreach($checkingdata['arrayResponse']['cart'] as $cart) {
-            
-            $data  = array(
-                'fk_product_id'      =>  $cart['product_id'],
-                'fk_variant_id'      =>  $cart['variant_id'],
-                'product_name'       =>  $cart['product_name'],
-                'image'              =>  $cart['product_image'],
-                'sku'                =>  $cart['variant_sku'],
-                'variant_description'=>  $cart['variant_description'],
-                'qty'                =>  $cart['qty'],
-                'acctual_price'      =>  $cart['price_info']['price'],
-                'discount_price'     =>  $cart['price_info']['discount'],
-                'purchase_price'     =>  $cart['purchase_price'],
-                'note'               =>  $cart['note'],
-                'fk_order_id'        =>  $insert['queryResponse']['data']['id'],
-                'created_at'         =>  now(),
-                'updated_at'         =>  now(),
-            );
-
-            //limit midtrans name
-            $str = $cart['product_name'];
-            $prodName =  (strlen($str) > 42) ? substr($str,0,42).'...' : $str;
-
-            $dataMidtrans = array(
-                'id'             => $cart['variant_sku'],
-                'price'          => $cart['purchase_price'],
-                'quantity'       => $cart['qty'],
-                'name'           => $prodName,
-            );
-
-            array_push($transformCart,$data);
-            array_push($transformforMidtrans,$dataMidtrans);
-
         }
 
-        $create = Order_product::insert($transformCart);
+        // Insert ordered products
+        $cartItems = [];
+        $midtransItems = [];
 
-        if($create) {
-                //add shipping to midtrans 
-                $shippingBill = array(
-                    'id'             => 'shiping-'.$courier['agent'].'-'.$findCourier['arrayResponse'][0]['service'],
-                    'price'          => $findCourier['arrayResponse'][0]['cost'][0]['value'],
-                    'quantity'       => 1,
-                    'name'           => $courier['agent'].'-'.$findCourier['arrayResponse'][0]['service'],
-                );
-                
-                // customer information - midtrans
-                $getCalculation = $orderCalculationService->orderCalculation($insert['queryResponse']['data']['id']);
-                
-                $voucherAmount = 0;
-                $voucherBill = array(
-                    'id'             => 'No Voucher',
-                    'price'          => 0,
-                    'quantity'       => 1,
-                    'name'           => 'No Discount Voucher',
-                );
+        foreach ($recheck['arrayResponse']['cart'] as $cart) {
+            $cartItems[] = [
+                'fk_product_id'      => $cart['product_id'],
+                'fk_variant_id'      => $cart['variant_id'],
+                'product_name'       => $cart['product_name'],
+                'image'              => $cart['product_image'],
+                'sku'                => $cart['variant_sku'],
+                'variant_description'=> $cart['variant_description'],
+                'qty'                => $cart['qty'],
+                'acctual_price'      => $cart['price_info']['price'],
+                'discount_price'     => $cart['price_info']['discount'],
+                'purchase_price'     => $cart['purchase_price'],
+                'note'               => $cart['note'],
+                'fk_order_id'        => $insert['queryResponse']['data']['id'],
+                'created_at'         => now(),
+                'updated_at'         => now(),
+            ];
 
-                if($getVoucher)
-                {
-                    $voucherAmount  = -abs($getCalculation['arrayResponse']['discount']);
-                    $voucherBill = array(
-                        'id'             => $getVoucher->code,
-                        'price'          => $voucherAmount,
-                        'quantity'       => 1,
-                        'name'           => 'Discount Voucher',
-                    );
-                }
+            $midtransItems[] = [
+                'id'       => $cart['variant_sku'],
+                'price'    => $cart['purchase_price'],
+                'quantity' => $cart['qty'],
+                'name'     => strlen($cart['product_name']) > 42 ? substr($cart['product_name'], 0, 42) . '...' : $cart['product_name'],
+            ];
+        }
 
-                array_push($transformforMidtrans,$shippingBill,$voucherBill);
-                $transaction_detail = array(
-                    'order_id'      =>  $getOrderNumber['arrayResponse']['invoice_number'],
-                    'gross_amount'  =>  $getCalculation['arrayResponse']['grand_total'],
-                );
+        Order_product::insert($cartItems);
 
-                $customerInfo = array(
-                    'first_name' =>  Auth::user()->name,
-                    'email'      => Auth::user()->email,
-                    'phone'      => Auth::user()->phone,
-                );
+        // Add shipping & voucher to Midtrans payload
+        $shippingBill = [
+            'id'       => 'shipping-' . $courier['agent'] . '-' . $foundCourier['arrayResponse'][0]['service'],
+            'price'    => $foundCourier['arrayResponse'][0]['cost'][0]['value'],
+            'quantity' => 1,
+            'name'     => $courier['agent'] . '-' . $foundCourier['arrayResponse'][0]['service'],
+        ];
 
-                //transaction - midtrans
-                $payload = array(
-                    'cart'                   =>  $transformforMidtrans,
-                    'transaction_details'    =>  $transaction_detail,
-                    'customer_details'       =>  $customerInfo
-                );
+        $getCalculation = $orderCalculationService->orderCalculation($insert['queryResponse']['data']['id']);
+        $voucherData = Voucher::find($voucherId);
 
-                // process midtrans
-                $midtransSnap = $createSnapTokenService->getSnapToken($payload);
-                
-                //update snap token 
-                $snapToken = array(
-                    'payment_snap_token'    =>$midtransSnap
-                );
+        $voucherBill = $voucherData
+            ? [
+                'id' => $voucherData->code,
+                'price' => -abs($getCalculation['arrayResponse']['discount']),
+                'quantity' => 1,
+                'name' => 'Discount Voucher',
+            ]
+            : [
+                'id' => 'no-voucher',
+                'price' => 0,
+                'quantity' => 1,
+                'name' => 'No Discount Voucher',
+            ];
 
-                $update  =  Order::find($insert['queryResponse']['data']['id']);
-                $update->update($snapToken);
+        $midtransItems[] = $shippingBill;
+        $midtransItems[] = $voucherBill;
 
-                $data = array(
-                    'uuid'      =>$update->uuid,
-                    'id'        => $update->id,
-                    'payment_snap_token' =>$update->payment_snap_token
-                );
+        $transactionDetail = [
+            'order_id'     => $orderNumber['arrayResponse']['invoice_number'],
+            'gross_amount' => $getCalculation['arrayResponse']['grand_total'],
+        ];
 
-                return $this->handleResponse($data,'checkout success',$request->all(),str_replace('/','.',$request->path()),201);
-            }
-            else {
-                $data  = array([
-                    'field'      =>'error-order-product',
-                    'message'    => 'oops something error when insert, please contact administrator'
-                ]);
+        $customerDetail = [
+            'first_name' => Auth::user()->name,
+            'email'      => Auth::user()->email,
+            'phone'      => Auth::user()->phone,
+        ];
 
-                return   $this->handleError($data,'error when insert order', $request->all(), str_replace('/', '.', $request->path()), 422);
-            }
-   
+        $midtransPayload = [
+            'cart'                => $midtransItems,
+            'transaction_details' => $transactionDetail,
+            'customer_details'    => $customerDetail,
+        ];
+
+        // Generate Midtrans Snap Token
+        $snapToken = $createSnapTokenService->getSnapToken($midtransPayload);
+
+        Order::where('id', $insert['queryResponse']['data']['id'])
+            ->update(['payment_snap_token' => $snapToken]);
+
+        $responseData = [
+            'uuid'               => $insert['queryResponse']['data']['uuid'],
+            'id'                 => $insert['queryResponse']['data']['id'],
+            'payment_snap_token' => $snapToken,
+        ];
+
+        return $this->handleResponse(
+            $responseData,
+            'Checkout success',
+            $validated,
+            str_replace('/', '.', $request->path()),
+            201
+        );
     }
-    private function checkingCart($productOrder) {
 
-         //checking product stock and price
-       $checkingdata = $this->checkingCartPerItemWithSummaryGroupingService->groupingPerItem($productOrder);
-     
-       if(count($checkingdata['arrayResponse']['out_of_stock']) >= 1)
-       {
-           return $this->handleArrayErrorResponse($checkingdata['arrayResponse'],'item out of stock','info');
-        }
-       if(count($checkingdata['arrayResponse']['cart']) <= 0)
-       {
-           $data  = array([
-               'field' =>'cart empty',
-               'message'=> 'cart is empty, please input some product'
-           ]);
+    /**
+     * Validate cart content and stock
+     */
+    private function checkingCart(array $productOrder)
+    {
+        $checkingData = $this->checkingCartService->groupingPerItem($productOrder);
 
-           return $this->handleArrayErrorResponse($data,'cart is empty please input some product','info');
+        if (count($checkingData['arrayResponse']['out_of_stock']) >= 1) {
+            return $this->handleArrayErrorResponse(
+                $checkingData['arrayResponse'],
+                'Item out of stock',
+                'info'
+            );
         }
 
-        return $this->handleArrayResponse($checkingdata['arrayResponse'],'checking success','info');
+        if (count($checkingData['arrayResponse']['cart']) <= 0) {
+            $data = [['field' => 'cart_empty', 'message' => 'Cart is empty, please add some products']];
+            return $this->handleArrayErrorResponse($data, 'Cart empty', 'info');
+        }
 
+        return $this->handleArrayResponse(
+            $checkingData['arrayResponse'],
+            'Cart check success',
+            'info'
+        );
     }
 }
