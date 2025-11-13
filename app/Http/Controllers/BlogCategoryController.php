@@ -9,99 +9,149 @@ use App\Http\Requests\BlogCategoryRequest\CreateCategoryBlogRequest;
 use App\Http\Requests\BlogCategoryRequest\UpdateCategoryBlogRequest;
 use App\Http\Requests\BlogCategoryRequest\DestroyCategoryBlogRequest;
 
-
 class BlogCategoryController extends BaseController
 {
-    private $blogCategoryInterface;
-   
-    
+    private BlogCategoryInterface $blogCategoryInterface;
+
     public function __construct(BlogCategoryInterface $blogCategoryInterface)
     {
-        $this->blogCategoryInterface            = $blogCategoryInterface;
+        $this->blogCategoryInterface = $blogCategoryInterface;
     }
 
-    public function show(GetCategoryBlogRequestValidation $request) {
+    /**
+     * Display a list of blog categories.
+     */
+    public function show(GetCategoryBlogRequestValidation $request)
+    {
+        $selectedColumn = ['*'];
+        $getBlogCategory = $this->blogCategoryInterface->show($request, $selectedColumn);
 
-        $selectedColumn = array('*');
-
-        $getBlogCategory = $this->blogCategoryInterface->show($request,$selectedColumn);
-        
-        if($getBlogCategory['queryStatus']) {
-            
-            return $this->handleResponse( $getBlogCategory['queryResponse'],'get Blog Category success',$request->all(),str_replace('/','.',$request->path()),201);
+        if ($getBlogCategory['queryStatus']) {
+            return $this->handleResponse(
+                $getBlogCategory['queryResponse'],
+                'Get blog category success',
+                $request->validated(),
+                str_replace('/', '.', $request->path()),
+                200
+            );
         }
 
-        $data  = array([
-            'field' =>'show-blog-category',
-            'message'=> 'error when show Blog Category'
-        ]);
+        $data = [
+            [
+                'field' => 'show-blog-category',
+                'message' => 'Error when showing blog category',
+            ],
+        ];
 
-        return   $this->handleError( $data,$getBlogCategory['queryMessage'],$request->all(),str_replace('/','.',$request->path()),422);
+        return $this->handleError(
+            $data,
+            $getBlogCategory['queryMessage'],
+            $request->validated(),
+            str_replace('/', '.', $request->path()),
+            422
+        );
     }
 
-    public function create(CreateCategoryBlogRequest $request) { 
+    /**
+     * Create a new blog category.
+     */
+    public function create(CreateCategoryBlogRequest $request)
+    {
+        $insert = $this->blogCategoryInterface->store($request->validated(), 'show_all');
 
-  
-        $insert = $this->blogCategoryInterface->store($request->all(),'show_all');
-    
-        if($insert['queryStatus']) {
-
-            return $this->handleResponse( $insert['queryResponse'],'Insert blog Category  success',$request->all(),str_replace('/','.',$request->path()),201);
-        }
-        else {
-
-            $data  = array([
-                'field' =>'create-blog-category',
-                'message'=> 'blog category create fail'
-            ]);
-
-            return   $this->handleError($data,$insert['queryMessage'],$request->all(),str_replace('/','.',$request->path()),422);
+        if ($insert['queryStatus']) {
+            return $this->handleResponse(
+                $insert['queryResponse'],
+                'Blog category created successfully',
+                $request->validated(),
+                str_replace('/', '.', $request->path()),
+                201
+            );
         }
 
-        
+        $data = [
+            [
+                'field' => 'create-blog-category',
+                'message' => 'Blog category creation failed',
+            ],
+        ];
+
+        return $this->handleError(
+            $data,
+            $insert['queryMessage'],
+            $request->validated(),
+            str_replace('/', '.', $request->path()),
+            422
+        );
     }
 
-    public function update(UpdateCategoryBlogRequest $request) { 
-        
-        $update = $this->blogCategoryInterface->update($request->id,$request->except(['id']),'show_all');
-          
-        if($update['queryStatus']) {
+    /**
+     * Update an existing blog category.
+     */
+    public function update(UpdateCategoryBlogRequest $request)
+    {
+        $update = $this->blogCategoryInterface->update(
+            $request->id,
+            $request->except(['id']),
+            'show_all'
+        );
 
-            return $this->handleResponse( $update['queryResponse'],'update blog Category success',$request->all(),str_replace('/','.',$request->path()),201);
+        if ($update['queryStatus']) {
+            return $this->handleResponse(
+                $update['queryResponse'],
+                'Blog category updated successfully',
+                $request->validated(),
+                str_replace('/', '.', $request->path()),
+                200
+            );
         }
-        else {
 
-            $data  = array([
-                'field' =>'create-blog-category',
-                'message'=> 'blog create fail'
-            ]);
+        $data = [
+            [
+                'field' => 'update-blog-category',
+                'message' => 'Blog category update failed',
+            ],
+        ];
 
-            return   $this->handleError($data,$update['queryMessage'],$request->all(),str_replace('/','.',$request->path()),422);
-        }
-
+        return $this->handleError(
+            $data,
+            $update['queryMessage'],
+            $request->validated(),
+            str_replace('/', '.', $request->path()),
+            422
+        );
     }
 
-    public function delete(DestroyCategoryBlogRequest $request) { //done
-        
-        //remove data
-        $destroy =   $this->blogCategoryInterface->destroy($request->by_id);
+    /**
+     * Delete a blog category.
+     */
+    public function delete(DestroyCategoryBlogRequest $request)
+    {
+        $destroy = $this->blogCategoryInterface->destroy($request->by_id);
 
-
-        if($destroy['queryStatus']) {
-
-            return $this->handleResponse( $destroy['queryResponse'],'Delete blog Category success',$request->all(),str_replace('/','.',$request->path()),201);
-        }
-        else {
-
-            $data  = array([
-                'field' =>'destroy-blog-category',
-                'message'=> 'blog category create fail'
-            ]);
-
-            return   $this->handleError($data,$destroy['queryMessage'],$request->all(),str_replace('/','.',$request->path()),422);
+        if ($destroy['queryStatus']) {
+            return $this->handleResponse(
+                $destroy['queryResponse'],
+                'Blog category deleted successfully',
+                $request->validated(),
+                str_replace('/', '.', $request->path()),
+                200
+            );
         }
 
-}
+        $data = [
+            [
+                'field' => 'destroy-blog-category',
+                'message' => 'Blog category deletion failed',
+            ],
+        ];
 
-
+        return $this->handleError(
+            $data,
+            $destroy['queryMessage'],
+            $request->validated(),
+            str_replace('/', '.', $request->path()),
+            422
+        );
+    }
 }
