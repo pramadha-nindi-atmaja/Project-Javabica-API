@@ -4,34 +4,49 @@ namespace App\Http\Controllers\Publics;
 
 use App\Http\Controllers\BaseController;
 use App\Http\Requests\BlogCategoryRequest\PublicCategoryBlogGetRequest;
-
 use App\Interfaces\BlogCategoryInterface;
-use Illuminate\Http\Request;
 
 class ShowPublicCategoryBlogController extends BaseController
 {
-    private $blogCategoryInterface;
+    protected BlogCategoryInterface $blogCategoryInterface;
 
     public function __construct(BlogCategoryInterface $blogCategoryInterface)
     {
         $this->blogCategoryInterface = $blogCategoryInterface;
     }
 
-    public function show(PublicCategoryBlogGetRequest $request) // Mengganti penggunaan request
+    /**
+     * Display public blog categories.
+     */
+    public function show(PublicCategoryBlogGetRequest $request)
     {
-        $selectedColumn = array('*');
+        $selectedColumns = ['*'];
 
-        $getBlogCategory = $this->blogCategoryInterface->show($request, $selectedColumn);
- 
-        if ($getBlogCategory['queryStatus']) {
-            return $this->handleResponse($getBlogCategory['queryResponse'], 'get CategoryBlog success', $request->all(), str_replace('/', '.', $request->path()), 201);
+        $result = $this->blogCategoryInterface->show($request, $selectedColumns);
+
+        if ($result['queryStatus']) {
+            return $this->handleResponse(
+                $result['queryResponse'],
+                'Get category blog success',
+                $request->validated(),
+                str_replace('/', '.', $request->path()),
+                200
+            );
         }
 
-        $data = array([
-            'field'   => 'show-category-blog',
-            'message' => 'error when showing category blog'
-        ]);
+        $errorData = [
+            [
+                'field' => 'show-category-blog',
+                'message' => 'Error while fetching category blog data',
+            ],
+        ];
 
-        return $this->handleError($data, $getBlogCategory['queryMessage'], $request->all(), str_replace('/', '.', $request->path()), 422);
+        return $this->handleError(
+            $errorData,
+            $result['queryMessage'] ?? 'Unknown error',
+            $request->validated(),
+            str_replace('/', '.', $request->path()),
+            422
+        );
     }
 }
