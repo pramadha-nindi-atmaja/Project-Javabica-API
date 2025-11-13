@@ -4,36 +4,49 @@ namespace App\Http\Controllers\Publics;
 
 use App\Http\Controllers\BaseController;
 use App\Http\Requests\CategoryAndCollectionPublicRequest\CategoryPublicGetRequest;
-
 use App\Interfaces\TaxonomyInterface;
-
 
 class ShowPublicCategoryController extends BaseController
 {
-
-    private $taxonomyInterface;
+    protected TaxonomyInterface $taxonomyInterface;
 
     public function __construct(TaxonomyInterface $taxonomyInterface)
     {
-        $this->taxonomyInterface            = $taxonomyInterface;
+        $this->taxonomyInterface = $taxonomyInterface;
     }
 
-     public function show(CategoryPublicGetRequest $request)
+    /**
+     * Display public taxonomy categories.
+     */
+    public function show(CategoryPublicGetRequest $request)
     {
-        $selectedColumn = array('*');
+        $selectedColumns = ['*'];
 
-        $getTaxonomy = $this->taxonomyInterface->show($request, $selectedColumn);
+        $result = $this->taxonomyInterface->show($request, $selectedColumns);
 
-        if ($getTaxonomy['queryStatus']) {
-
-            return $this->handleResponse($getTaxonomy['queryResponse'], 'get Category success', $request->all(), str_replace('/', '.', $request->path()), 201);
+        if ($result['queryStatus']) {
+            return $this->handleResponse(
+                $result['queryResponse'],
+                'Get category success',
+                $request->validated(),
+                str_replace('/', '.', $request->path()),
+                200
+            );
         }
 
-        $data  = array([
-            'field' => 'show-user',
-            'message' => 'error when show taxonomy'
-        ]);
+        $errorData = [
+            [
+                'field' => 'show-category',
+                'message' => 'Error while fetching taxonomy data',
+            ],
+        ];
 
-        return   $this->handleError($data, $getTaxonomy['queryMessage'], $request->all(), str_replace('/', '.', $request->path()), 422);
+        return $this->handleError(
+            $errorData,
+            $result['queryMessage'] ?? 'Unknown error',
+            $request->validated(),
+            str_replace('/', '.', $request->path()),
+            422
+        );
     }
 }
