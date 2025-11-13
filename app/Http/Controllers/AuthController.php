@@ -2,355 +2,467 @@
 
 namespace App\Http\Controllers;
 
-use App\Http\Requests\AuthRequest\LoginUsersRequest;
-use App\Http\Requests\AuthRequest\ValidateVerificationAccountRequestUsers;
+use App\Http\Requests\AuthRequest\{
+    LoginUsersRequest,
+    ValidateVerificationAccountRequestUsers,
+    ResetPasswordRequest,
+    ResetNewPasswordRequest,
+    UpdateProfileUsersRequest
+};
+use App\Http\Requests\UsersRequest\ChangePasswordRequest;
 use App\Interfaces\UsersInterface;
 use App\Mail\AccountVerificationMail;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
-use App\Services\AuthServices\LoginService;
-use App\Services\AuthServices\ResetPasswordService;
-use App\Http\Requests\AuthRequest\ResetPasswordRequest;
-use App\Http\Requests\AuthRequest\ResetNewPasswordRequest;
-use App\Http\Requests\AuthRequest\UpdateProfileUsersRequest;
-use App\Http\Requests\UsersRequest\ChangePasswordRequest;
-use App\Services\AuthServices\ChangePasswordService;
+use App\Services\AuthServices\{
+    LoginService,
+    ResetPasswordService,
+    ChangePasswordService
+};
 use App\Services\OtpServices;
-use Illuminate\Support\Facades\Mail;
-
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\{
+    Auth,
+    Mail
+};
+use Throwable;
 
 class AuthController extends BaseController
 {
-
-    private $LoginService;
-    private $ResetPasswordService;
-    private $ChangePasswordService;
-    private $OtpServices;
-    private $usersInterfaces;
-
+    protected LoginService $loginService;
+    protected ResetPasswordService $resetPasswordService;
+    protected ChangePasswordService $changePasswordService;
+    protected OtpServices $otpServices;
+    protected UsersInterface $usersInterface;
 
     public function __construct(
-        LoginService $LoginService,
-        ResetPasswordService $ResetPasswordService,
-        ChangePasswordService $ChangePasswordService,   
-        OtpServices  $OtpServices,
-        UsersInterface $usersInterfaces
-    )
-    {
-            $this->LoginService               = $LoginService;
-            $this->ResetPasswordService       = $ResetPasswordService;
-            $this->ChangePasswordService      = $ChangePasswordService;
-            $this->OtpServices                = $OtpServices;
-            $this->usersInterfaces            = $usersInterfaces;
-
+        LoginService $loginService,
+        ResetPasswordService $resetPasswordService,
+        ChangePasswordService $changePasswordService,
+        OtpServices $otpServices,
+        UsersInterface $usersInterface
+    ) {
+        $this->loginService = $loginService;
+        $this->resetPasswordService = $resetPasswordService;
+        $this->changePasswordService = $changePasswordService;
+        $this->otpServices = $otpServices;
+        $this->usersInterface = $usersInterface;
     }
-     //==============login auth purpose
-     public function loginDocs(Request  $request) {
 
+    // ==================== LOGIN AUTH FOR DOCS ====================
 
+    public function loginDocs(Request $request)
+    {
         $credentials = $request->validate([
             'email' => ['required', 'email'],
             'password' => ['required'],
         ]);
 
         if (Auth::guard('apps')->attempt($credentials)) {
-          
             $request->session()->regenerate();
-          
             return redirect('system-app/home');
         }
 
         return back()->withErrors([
             'email' => 'The provided credentials do not match our records.',
         ])->onlyInput('email');
-
     }
+
     public function logoutDocs(Request $request)
     {
         Auth::guard('apps')->logout();
         $request->session()->invalidate();
         $request->session()->regenerateToken();
+
         return redirect('/');
     }
 
-    //============================end of auth docs purpose
-    
-    
-   
+    // ==================== LOGOUT ====================
+
     public function logout(Request $request)
     {
+        $user = auth('sanctum')->user();
 
-        auth('sanctum')->user()->currentAccessToken()->delete();
+        if ($user && $user->currentAccessToken()) {
+            $user->currentAccessToken()->delete();
+        }
 
-        $data  = array(
-            'field'=>'logout',
-            'message'=>'logout account success'
+        $data = [
+            'field' => 'logout',
+            'message' => 'Logout account success'
+        ];
+
+        return $this->handleResponse(
+            $data,
+            'Logout user success',
+            $request->validated() ?? $request->all(),
+            str_replace('/', '.', $request->path()),
+            200
         );
-
-        return  $this->handleResponse($data,'logout users success',$request->all(),str_replace('/','.',$request->path()),200);
-    
     }
 
-    public function resetPassword(ResetPasswordRequest $request ) { //ok
-        
-        $resetPass =  $this->ResetPasswordService->resetPassword($request);
-        
-        if($resetPass['arrayStatus']) {
+    // ==================== PASSWORD RESET ====================
 
-            $data  = array(
-                'field' =>'reset-password',
-                'message'=> 'reset password link to email success'
+    public function resetPassword(ResetPasswordRequest $request)
+    {
+        $resetPass = $this->resetPasswordService->resetPassword($request);
+
+        if ($resetPass['arrayStatus']) {
+            $data = [
+                'field' => 'reset-password',
+                'message' => 'Reset password link sent successfully'
+            ];
+
+            return $this->handleResponse(
+                $data,
+                'Reset link password success',
+                $request->validated(),
+                str_replace('/', '.', $request->path()),
+                200
             );
+        }
 
-            return $this->handleResponse($data,'reset link password success',$request->all(),str_replace('/','.',$request->path()),200);
-        }
-        else {
-            $data  = array([
-                'field' =>'reset-password',
-                'message'=>'something wrong when sending link update password'
-            ]);
-            return   $this->handleError( $data,'reset link password fail',$request->all(),str_replace('/','.',$request->path()),422);
-        }
-        
+        $data = [[
+            'field' => 'reset-password',
+            'message' => 'Failed to send password reset link'
+        ]];
+
+        return $this->handleError(
+            $data,
+            'Reset link password failed',
+            $request->validated(),
+            str_replace('/', '.', $request->path()),
+            422
+        );
     }
 
-    public function resetNewPassword(ResetNewPasswordRequest $request)  { //ok
+    public function resetNewPassword(ResetNewPasswordRequest $request)
+    {
+        $resetNewPass = $this->resetPasswordService->resetNewPassword($request);
 
-        $resetNewPass =   $this->ResetPasswordService->resetNewPassword($request);
+        if ($resetNewPass['arrayStatus']) {
+            $data = [
+                'field' => 'reset-new-password',
+                'message' => 'New password successfully saved'
+            ];
 
-        if($resetNewPass['arrayStatus']) {
-            $data  = array(
-                'field' =>'reset-new-password',
-                'message'=> 'new password successfuly saved'
+            return $this->handleResponse(
+                $data,
+                'Reset new password success',
+                $request->validated(),
+                str_replace('/', '.', $request->path()),
+                200
             );
-
-            return $this->handleResponse($data,'reset new password success',$request->all(),str_replace('/','.',$request->path()),201);
-        }
-        else {
-
-            $data  = array([
-                'field' =>'reset-new-password',
-                'message'=> 'error when reset new password, please try again'
-            ]);
-            
-             return   $this->handleError($data,$resetNewPass['arrayMessage'],$request->all(),str_replace('/','.',$request->path()),422);
         }
 
+        $data = [[
+            'field' => 'reset-new-password',
+            'message' => 'Failed to reset new password, please try again'
+        ]];
+
+        return $this->handleError(
+            $data,
+            $resetNewPass['arrayMessage'] ?? 'Unknown error',
+            $request->validated(),
+            str_replace('/', '.', $request->path()),
+            422
+        );
     }
+
+    // ==================== EMAIL VERIFICATION ====================
 
     /**
      * @lrd:start
-     * # routes email verification hanya dapat dilakukan 1 menit sekali, konfigurasinya ada di route service provider
-     * # email verification menggunakan 4 digit dan harus dalam keadaan login
-     *
+     * # Email verification can only be requested once per minute.
+     * # The verification uses a 4-digit OTP and requires the user to be logged in.
      * @lrd:end
      */
-    public function AccountVerificationEmail(Request $request) { //ok
-
-        $checkToGetData = auth('sanctum')->user();
-
-       
-            if($request->user()->hasVerifiedEmail()) {
-                $data  = array(
-                    'field' =>'check-user-verification',
-                    'message' =>'your email has been verified'
-                );
-                return $this->handleResponse($data,'email has been verify',$request->all(),str_replace('/','.',$request->path()),200);
-            }
-
-            $getOtp =  $this->OtpServices->generateOTP($request->user()->email);
-
-            if($getOtp['arrayStatus']) {
-
-                    //send email
-                    $data = array(
-                        'OtpToken'   => $getOtp['arrayResponse']['otp'],
-                        'email'      => $request->user()->email,
-                        'name'       => $request->user()->name,
-                        'expiredAt'  => $getOtp['arrayResponse']['expiredOTP']
-                    );
-
-                    try {
-                            $sendMail =  Mail::to($request->user()->email)->queue(new AccountVerificationMail($data));
-                            if($sendMail) {
-                            $data = array(
-                                'field' => 'sent-OTP-by_email',
-                                'message'=> 'Verification TOKEN has been send to your email',
-                            );
-                                return $this->handleResponse($data,'OTP sent via email success',$request->all(),str_replace('/','.',$request->path()),200);
-                            }
-                    }
-                    catch (Throwable $e) {
-                        $data = array([
-                            'field' => 'sent-OTP-by_email',
-                            'message'=> 'Verification TOKEN fail to sen to your email',
-                        ]);
-                        return   $this->handleError($data,'OTP sent via email fail',$request->all(),str_replace('/','.',$request->path()),500);
-                    }
-
-            }
-
-            $data  = array([
-                'field' =>'generate-otp-token',
-                'message'=> 'generate OTP fail'
-            ]);
-
-            return   $this->handleError($data,$getOtp['arrayMessage'],$request->all(),str_replace('/','.',$request->path()),422);
-    }
-    
-    public function validateVerificationAccount(ValidateVerificationAccountRequestUsers $request)  
+    public function accountVerificationEmail(Request $request)
     {
+        $user = auth('sanctum')->user();
 
-        $checkToGetDataUsers = auth('sanctum')->user();
+        if ($user->hasVerifiedEmail()) {
+            $data = [
+                'field' => 'check-user-verification',
+                'message' => 'Your email has already been verified'
+            ];
 
-        if(Auth::user()->hasVerifiedEmail()) {
-            
-            return $this->handleResponse($checkToGetDataUsers,'account has been verify',$request->all(),str_replace('/','.',$request->path()),200);
+            return $this->handleResponse(
+                $data,
+                'Email already verified',
+                [],
+                str_replace('/', '.', $request->path()),
+                200
+            );
         }
 
-        $getOtp = $request->otp;
-        $validate =  $this->OtpServices->validateOTP($getOtp,$request->user()->email);
+        $otp = $this->otpServices->generateOTP($user->email);
 
-        if($validate['arrayStatus']) {
-            
-            $payload = array(
-                'email_verified_at' => now(),
+        if ($otp['arrayStatus']) {
+            $mailData = [
+                'OtpToken' => $otp['arrayResponse']['otp'],
+                'email' => $user->email,
+                'name' => $user->name,
+                'expiredAt' => $otp['arrayResponse']['expiredOTP']
+            ];
+
+            try {
+                Mail::to($user->email)->queue(new AccountVerificationMail($mailData));
+
+                $data = [
+                    'field' => 'send-otp-email',
+                    'message' => 'Verification token sent to your email'
+                ];
+
+                return $this->handleResponse(
+                    $data,
+                    'OTP sent via email success',
+                    [],
+                    str_replace('/', '.', $request->path()),
+                    200
+                );
+            } catch (Throwable $e) {
+                $data = [[
+                    'field' => 'send-otp-email',
+                    'message' => 'Failed to send verification token via email'
+                ]];
+
+                return $this->handleError(
+                    $data,
+                    'OTP email sending failed',
+                    [],
+                    str_replace('/', '.', $request->path()),
+                    500
+                );
+            }
+        }
+
+        $data = [[
+            'field' => 'generate-otp-token',
+            'message' => 'Failed to generate OTP'
+        ]];
+
+        return $this->handleError(
+            $data,
+            $otp['arrayMessage'] ?? 'Unknown error',
+            [],
+            str_replace('/', '.', $request->path()),
+            422
+        );
+    }
+
+    public function validateVerificationAccount(ValidateVerificationAccountRequestUsers $request)
+    {
+        $user = auth('sanctum')->user();
+
+        if ($user->hasVerifiedEmail()) {
+            return $this->handleResponse(
+                $user,
+                'Account already verified',
+                $request->validated(),
+                str_replace('/', '.', $request->path()),
+                200
             );
+        }
 
+        $validate = $this->otpServices->validateOTP($request->otp, $user->email);
 
-            $updateUser =      $this->usersInterfaces->update($checkToGetDataUsers->id,$payload);
+        if ($validate['arrayStatus']) {
+            $payload = ['email_verified_at' => now()];
 
+            $updateUser = $this->usersInterface->update($user->id, $payload);
 
-            if(!$updateUser['queryStatus']) {
+            if (!$updateUser['queryStatus']) {
+                $data = [[
+                    'field' => 'account-validate-email-otp-fail',
+                    'message' => 'Failed to verify account with OTP'
+                ]];
 
-                $data  = array([
-                    'field' =>'account-validate-email-OTP-fail',
-                    'message'=> 'OTP validate account fail'
-                ]);
-
-                return   $this->handleError($data,$updateUser['queryMessage'],$request->all(),str_replace('/','.',$request->path()),422);
+                return $this->handleError(
+                    $data,
+                    $updateUser['queryMessage'] ?? 'Unknown error',
+                    $request->validated(),
+                    str_replace('/', '.', $request->path()),
+                    422
+                );
             }
 
-            $data  = array(
-                'field' =>'account-validate-email-OTP-success',
-                'message'=> 'validate account using OTP success'
+            $data = [
+                'field' => 'account-validate-email-otp-success',
+                'message' => 'Account successfully verified using OTP'
+            ];
+
+            return $this->handleResponse(
+                $data,
+                'OTP account verification success',
+                $request->validated(),
+                str_replace('/', '.', $request->path()),
+                200
             );
-
-            return $this->handleResponse($data,'OTP validate account success',$request->all(),str_replace('/','.',$request->path()),201);
-
         }
 
-        $data  = array([
-            'field' =>'account-validate-email-OTP-Expired',
-            'message'=> 'oops your OTP has been wrong / expired please try again'
-        ]);
+        $data = [[
+            'field' => 'account-validate-email-otp-expired',
+            'message' => 'Your OTP is invalid or expired, please try again'
+        ]];
 
-        return   $this->handleError($data,$validate['arrayMessage'],$request->all(),str_replace('/','.',$request->path()),422,'info');
-
+        return $this->handleError(
+            $data,
+            $validate['arrayMessage'] ?? 'Invalid OTP',
+            $request->validated(),
+            str_replace('/', '.', $request->path()),
+            422
+        );
     }
-   
+
+    // ==================== LOGIN ====================
+
     /**
      * @lrd:start
-     * # apabila login dari halaman ini, maka secara otomatis sistem akan menaro token dalam session sehingga tidak perlu dimasukan dalam bearer yang tertera  di atas, 
-     * dan sistem akan mengambil session yang paling terakhir, sehingga apabila ingin authnya berdasarkan token, maka dapatkan token/login dari platform lain seperti postman lalu taro tokennya di bearear di atas kanan
-     *
+     * # Login from this endpoint automatically stores the token in session.
+     * # If using API token manually, obtain it from Postman or other platforms.
      * @lrd:end
      */
     public function login(LoginUsersRequest $request)
-    {   
-        if($request->isEmail == false){
-
-            $loginUser = $this->LoginService->phonePassword($request->only('phone','password'));
-        }
-        else {
-            $loginUser = $this->LoginService->emailPassword($request->only('email','password'));
-        }
-       
-        if($loginUser['arrayStatus']) {
-            
-            $reformatRequest                 = $request->all();
-            $reformatRequest['password']     = '[protected]';
-
-            return  $this->handleResponse($loginUser['arrayResponse'],'login success',$reformatRequest,str_replace('/','.',$request->path()),200);
-        }
-        else {
-            $data  = array([
-                'field' =>'login',
-                'message'=> 'username/password is not correct'
-            ]);
-            return   $this->handleError($data,$loginUser['arrayMessage'],$request->all(),str_replace('/','.',$request->path()),422);
-
-        }
-    }
-     public function changePassword(ChangePasswordRequest $request)  //done
     {
+        $loginUser = $request->boolean('isEmail')
+            ? $this->loginService->emailPassword($request->only('email', 'password'))
+            : $this->loginService->phonePassword($request->only('phone', 'password'));
 
-        $userdata = array(
-            'registed_password' =>auth('sanctum')->user()->password,
-            'user_id'           =>auth('sanctum')->user()->id,
+        if ($loginUser['arrayStatus']) {
+            $sanitizedRequest = $request->all();
+            $sanitizedRequest['password'] = '[protected]';
+
+            return $this->handleResponse(
+                $loginUser['arrayResponse'],
+                'Login success',
+                $sanitizedRequest,
+                str_replace('/', '.', $request->path()),
+                200
+            );
+        }
+
+        $data = [[
+            'field' => 'login',
+            'message' => 'Incorrect username or password'
+        ]];
+
+        return $this->handleError(
+            $data,
+            $loginUser['arrayMessage'] ?? 'Login failed',
+            $request->validated(),
+            str_replace('/', '.', $request->path()),
+            422
+        );
+    }
+
+    // ==================== CHANGE PASSWORD ====================
+
+    public function changePassword(ChangePasswordRequest $request)
+    {
+        $user = auth('sanctum')->user();
+
+        $userData = [
+            'registed_password' => $user->password,
+            'user_id' => $user->id,
+        ];
+
+        $resetPass = $this->changePasswordService->updatePassword(
+            $userData,
+            $request->only('password', 'current_password')
         );
 
-        $resetPass  =   $this->ChangePasswordService->updatePassword($userdata,$request->only('password','current_password'));
-    
-        if($resetPass['arrayStatus']) {
-            $data  = array([
-                'field' =>'change-password',
-                'message'=> 'perubahan password baru berhasil'
-            ]);
-            $reformatRequest = $request->all();
-            $reformatRequest['password']                 = '[protected]';
-            $reformatRequest['password_confirmation']    = '[protected]';
-            $reformatRequest['current_password']         = '[protected]';
-            return  $this->handleResponse($data,'update password users success',$reformatRequest,str_replace('/','.',$request->path()),201);
-        }
-        else {
-            
-            $data  = array([
-                'field' =>'change-password',
-                'message'=> 'current password tidak benar, silahkan coba kembali'
-            ]);
+        if ($resetPass['arrayStatus']) {
+            $data = [[
+                'field' => 'change-password',
+                'message' => 'Password updated successfully'
+            ]];
 
-            
-            return   $this->handleError($data,$resetPass['arrayMessage'],$request->all(),str_replace('/','.',$request->path()),422);
+            $sanitized = $request->all();
+            $sanitized['password'] = '[protected]';
+            $sanitized['password_confirmation'] = '[protected]';
+            $sanitized['current_password'] = '[protected]';
+
+            return $this->handleResponse(
+                $data,
+                'Update user password success',
+                $sanitized,
+                str_replace('/', '.', $request->path()),
+                200
+            );
         }
 
+        $data = [[
+            'field' => 'change-password',
+            'message' => 'Incorrect current password'
+        ]];
+
+        return $this->handleError(
+            $data,
+            $resetPass['arrayMessage'] ?? 'Change password failed',
+            $request->validated(),
+            str_replace('/', '.', $request->path()),
+            422
+        );
     }
-    public function profile(Request $request) //done
+
+    // ==================== PROFILE ====================
+
+    public function profile(Request $request)
     {
-       
-        $request->request->add([
-                'by_id' => auth('sanctum')->user()->id,
-                'collection_type'=>'showBasic'
+        $request->merge([
+            'by_id' => auth('sanctum')->user()->id,
+            'collection_type' => 'showBasic',
         ]);
 
-        $columnRequest  = array('*');
-        $getUserProfile =  $this->usersInterfaces->show($request->all(),$columnRequest);
+        $getUserProfile = $this->usersInterface->show($request->all(), ['*']);
 
-        if($getUserProfile['queryStatus']) {
-
-            return  $this->handleResponse($getUserProfile['queryResponse'],'show my profile users success',$request->all(),str_replace('/','.',$request->path()),200);
+        if ($getUserProfile['queryStatus']) {
+            return $this->handleResponse(
+                $getUserProfile['queryResponse'],
+                'Show profile success',
+                $request->all(),
+                str_replace('/', '.', $request->path()),
+                200
+            );
         }
 
-        return $getUserProfile;
-           
+        return $this->handleError(
+            [],
+            $getUserProfile['queryMessage'] ?? 'Failed to get user profile',
+            $request->all(),
+            str_replace('/', '.', $request->path()),
+            422
+        );
     }
-    public function updateProfile(UpdateProfileUsersRequest $request) //done
+
+    public function updateProfile(UpdateProfileUsersRequest $request)
     {
-        
-        $updateUser = $this->usersInterfaces->update(auth('sanctum')->user()->id,$request->except(['email']),'showBasic');
+        $updateUser = $this->usersInterface->update(
+            auth('sanctum')->user()->id,
+            $request->except(['email']),
+            'showBasic'
+        );
 
-        if($updateUser['queryStatus']) {
-
-            return $this->handleResponse($updateUser['queryResponse'],'update users success',$request->all(),str_replace('/','.',$request->path()),201);
+        if ($updateUser['queryStatus']) {
+            return $this->handleResponse(
+                $updateUser['queryResponse'],
+                'Update user profile success',
+                $request->validated(),
+                str_replace('/', '.', $request->path()),
+                200
+            );
         }
-        else {
-            $data  = array([
-                'field' =>'update-profile',
-                'message'=>'update profile tidak berhasil'
-            ]);
 
-            return   $this->handleError($data,$updateUser['queryMessage'],$request->all(),str_replace('/','.',$request->path()),422);
-        }
-       
+        $data = [[
+            'field' => 'update-profile',
+            'message' => 'Failed to update user profile'
+        ]];
+
+        return $this->handleError(
+            $data,
+            $updateUser['queryMessage'] ?? 'Unknown error',
+            $request->validated(),
+            str_replace('/', '.', $request->path()),
+            422
+        );
     }
 }
