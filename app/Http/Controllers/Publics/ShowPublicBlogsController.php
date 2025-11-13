@@ -5,37 +5,48 @@ namespace App\Http\Controllers\Publics;
 use App\Http\Controllers\BaseController;
 use App\Http\Requests\BlogRequest\PublicBlogGetRequest;
 use App\Interfaces\BlogInterface;
-use Illuminate\Http\Request;
 
 class ShowPublicBlogsController extends BaseController
 {
-    private $blogInterface;
-    private $handleOutputVariantProductService;
-   
-    
+    protected BlogInterface $blogInterface;
+
     public function __construct(BlogInterface $blogInterface)
     {
-        $this->blogInterface        = $blogInterface;
-   
+        $this->blogInterface = $blogInterface;
     }
-    public function show(PublicBlogGetRequest $request) {
 
-      
-        $selectedColumn = array('*');
+    /**
+     * Display a list or single public blog.
+     */
+    public function show(PublicBlogGetRequest $request)
+    {
+        $selectedColumns = ['*'];
 
-        $get = $this->blogInterface->show($request,$selectedColumn);
-  
+        $result = $this->blogInterface->show($request, $selectedColumns);
 
-        if ($get['queryStatus']) {
-
-            return $this->handleResponse($get['queryResponse'], 'get Blog success', $request->all(), str_replace('/', '.', $request->path()), 201);
+        if ($result['queryStatus']) {
+            return $this->handleResponse(
+                $result['queryResponse'],
+                'Get blog success',
+                $request->validated(),
+                str_replace('/', '.', $request->path()),
+                200
+            );
         }
 
-        $data  = array([
-            'field' => 'show-blog',
-            'message' => 'error when show blog'
-        ]);
-       
-        return   $this->handleError($data, $get['queryMessage'], $request->all(), str_replace('/', '.', $request->path()), 422);
+        $errorData = [
+            [
+                'field' => 'show-blog',
+                'message' => 'Error while fetching blog data',
+            ],
+        ];
+
+        return $this->handleError(
+            $errorData,
+            $result['queryMessage'] ?? 'Unknown error',
+            $request->validated(),
+            str_replace('/', '.', $request->path()),
+            422
+        );
     }
 }
