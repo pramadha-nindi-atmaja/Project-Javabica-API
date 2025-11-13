@@ -1,225 +1,173 @@
 <?php
 
-
 namespace App\Http\Controllers;
-use App\Http\Controllers\Controller ;
+
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 
-/*
-refrence
-
-https://medium.com/@mwaysolutions/10-best-practices-for-better-restful-api-cbe81b06f291
-
-200 — OK — Eyerything is working
-201 — OK — New resource has been created
-201 — OK — New resource has been updated
-204 — OK — The resource was successfully deleted
-
-400 — Bad Request — The request was invalid or cannot be served. The exact error should be explained in the error payload. E.g. „The JSON is not valid“
-401 — Unauthorized — The request requires an user authentication
-403 — Forbidden — The server understood the request, but is refusing it or the access is not allowed.
-404 — Not found — There is no resource behind the URI.
-422 — Unprocessable Entity — Should be used if the server cannot process the enitity, e.g. if an image cannot be formatted or mandatory fields are missing in the payload.
-429 — Too Many Requests response status code indicates the user has sent too many requests in a given amount of time ("rate limiting").
-            
-500 — Internal Server Error — API developers should avoid this error. If an error occurs in the global catch blog, the stracktrace should be logged and not returned as response.
-
-*/
 class BaseController extends Controller
 {
+    /**
+     * Handle successful API responses.
+     */
+    public function handleResponse(
+        mixed $result,
+        string $message,
+        ?array $params = null,
+        ?string $title = null,
+        int $code = 200,
+        string $logType = 'info'
+    ) {
+        $requestNo = uniqid() . rand(1, 99999);
 
-    public function handleResponse($result, $msg,$params=null,$title=null,$code=200,$logType='info')
-    { 
-        $requestNo = uniqid().rand(1,99999);
-    	$res = [
+        $response = [
             'success'    => 'OK',
             'code'       => $code,
             'request_no' => $requestNo,
             'timestamp'  => Carbon::now()->toDateTimeString(),
-            'message'    => $msg,
+            'message'    => $message,
             'title'      => $title,
-        
+            'data'       => $result ?: [],
+            'params'     => $params ?? [],
         ];
-        if(!empty($result)){
-            $res['data'] = $result;
-        }
-        else {
-            $res['data'] = [];
-        }
-        
-        $res['params'] = $params;
 
-        $publicOrPrivate = $this->publicOrPrivate();
-        $res['params']['requested'] = $publicOrPrivate;
-      
-        $this->logProcess($logType,$res,'handleResponse',$requestNo);
-        $data = response()->json($res, 200);
-      
-        return $data;
-    
+        $response['params']['requested'] = $this->getRequesterIdentifier();
+
+        $this->logProcess($logType, $response, __FUNCTION__, $requestNo);
+
+        return response()->json($response, $code);
     }
 
-    public function handleError($result = [], $msg, $params=null,$title=null,$code = 404,$logType='emergency')
-    {
-        $requestNo = uniqid().rand(1,99999);
-        $errorTitle = $this->ErrorCode($code);
+    /**
+     * Handle failed API responses.
+     */
+    public function handleError(
+        array $result = [],
+        string $message = 'Error occurred',
+        ?array $params = null,
+        ?string $title = null,
+        int $code = 404,
+        string $logType = 'emergency'
+    ) {
+        $requestNo = uniqid() . rand(1, 99999);
+        $errorTitle = $this->getErrorTitle($code);
 
-    	$res = [
+        $response = [
             'success'    => $errorTitle,
             'code'       => $code,
             'request_no' => $requestNo,
             'timestamp'  => Carbon::now()->toDateTimeString(),
-            'message'    => $msg,
+            'message'    => $message,
             'title'      => $title,
-          
-           
+            'data'       => $result ?: [],
+            'params'     => $params ?? [],
         ];
-        if(!empty($result)){
-            $res['data'] = $result;
-        }
 
-        $res['params']   = $params;
-        $publicOrPrivate = $this->publicOrPrivate();
-        
-        $res['params']['request'] = $publicOrPrivate;
-     
-        $this->logProcess($logType,$res,'handleError',$requestNo);
-        return response()->json($res, $code);
+        $response['params']['requested'] = $this->getRequesterIdentifier();
+
+        $this->logProcess($logType, $response, __FUNCTION__, $requestNo);
+
+        return response()->json($response, $code);
     }
-    
-    public function handleArrayResponse($response,$message='process success',$logType='info') {
 
-        $response  = array(
+    /**
+     * Return a standardized array success response (internal service use).
+     */
+    public function handleArrayResponse(mixed $response, string $message = 'Process success', string $logType = 'info'): array
+    {
+        $formatted = [
             'arrayStatus'   => true,
             'arrayMessage'  => $message,
-            'arrayResponse' => $response
-        );
+            'arrayResponse' => $response,
+        ];
 
-     
-       $this->logProcess($logType,$response,'handleArrayResponse');
-        return $response;
-
-    }
-    public function handleArrayErrorResponse($response,$message='process fail',$logtype='emergency') {
-
-        $response  = array(
-            'arrayStatus'    => false,
-            'arrayMessage'   => $message,
-            'arrayResponse'  => $response
-        );
-
-       
-        $this->logProcess($logtype,$response,'handleArrayErrorResponse');
-        return $response;
-
+        $this->logProcess($logType, $formatted, __FUNCTION__);
+        return $formatted;
     }
 
-    public function handleQueryArrayResponse($reponse =[],$message='query success',$logtype='info') {
+    /**
+     * Return a standardized array error response (internal service use).
+     */
+    public function handleArrayErrorResponse(mixed $response, string $message = 'Process failed', string $logType = 'emergency'): array
+    {
+        $formatted = [
+            'arrayStatus'   => false,
+            'arrayMessage'  => $message,
+            'arrayResponse' => $response,
+        ];
 
-        $response =  array(
-            'queryStatus'       => true,
-            'queryMessage'      => $message,
-            'queryResponse'     => $reponse
-        );
-     
-        $this->logProcess($logtype,$response,'handleQueryArrayResponse');
-        return $response;
+        $this->logProcess($logType, $formatted, __FUNCTION__);
+        return $formatted;
     }
-    public function handleQueryErrorArrayResponse($reponse =[],$message='query fail',$logtype='emergency') {
 
-        $response =  array(
-            'queryStatus'       => false,
-            'queryMessage'      => $message,
-            'queryResponse'     => $reponse
-        );
+    /**
+     * Return a standardized query success response.
+     */
+    public function handleQueryArrayResponse(array $response = [], string $message = 'Query success', string $logType = 'info'): array
+    {
+        $formatted = [
+            'queryStatus'   => true,
+            'queryMessage'  => $message,
+            'queryResponse' => $response,
+        ];
 
-      
-       $this->logProcess($logtype,$response,'handleQueryErrorArrayResponse');
-        return $response;
+        $this->logProcess($logType, $formatted, __FUNCTION__);
+        return $formatted;
     }
-    private function publicOrPrivate() {
-      
-        if(auth('sanctum')->user()) {
-            $getusersUUid = auth('sanctum')->user()->uuid;
-        }
-        else {
-            $getusersUUid = 'publics';
-        }
 
-        return  $getusersUUid;
+    /**
+     * Return a standardized query error response.
+     */
+    public function handleQueryErrorArrayResponse(array $response = [], string $message = 'Query failed', string $logType = 'emergency'): array
+    {
+        $formatted = [
+            'queryStatus'   => false,
+            'queryMessage'  => $message,
+            'queryResponse' => $response,
+        ];
+
+        $this->logProcess($logType, $formatted, __FUNCTION__);
+        return $formatted;
     }
-    private function logProcess($logType,$response,$methodType,$request_numb=null) {
 
-        $getusersUUid = $this->publicOrPrivate();
-
-        if($logType == 'emergency') {
-
-            return   Log::emergency("".$getusersUUid."-[ ".$request_numb." ]-".$methodType."",$response);
-        }
-        if($logType == 'info') {
-
-            return Log::info("".$getusersUUid."-[ ".$request_numb." ]-".$methodType."",$response);
-        }
-        if($logType == 'warning') {
-
-            return Log::warning("".$getusersUUid."-[ ".$request_numb." ]-".$methodType."",$response);
-        
-        }
-        if($logType == 'notice') {
-
-            return Log::notice("".$getusersUUid."-[ ".$request_numb." ]-".$methodType."",$response);
-        
-        }
-        if($logType == 'error') {
-
-            return Log::error("".$getusersUUid."-[ ".$request_numb." ]-".$methodType."",$response);
-        
-        }
-        if($logType == 'critical') {
-
-            return Log::critical("".$getusersUUid."-[ ".$request_numb." ]-".$methodType."",$response);
-        }else {
-
-            return Log::info("".$getusersUUid."-[ ".$request_numb." ]-".$methodType."",$response);
-        }
-
+    /**
+     * Identify the requester (authenticated user or public).
+     */
+    private function getRequesterIdentifier(): string
+    {
+        return auth('sanctum')->user()->uuid ?? 'public';
     }
-    private function ErrorCode($code) {
 
+    /**
+     * Centralized logging handler.
+     */
+    private function logProcess(string $logType, array $response, string $method, ?string $requestNo = null): void
+    {
+        $uuid = $this->getRequesterIdentifier();
+        $prefix = "{$uuid}-[ {$requestNo} ]-{$method}";
 
-        if($code == 400) {
-            //400 — Bad Request — The request was invalid or cannot be served. The exact error should be explained in the error payload. E.g. „The JSON is not valid“
-            $errorTitle = 'Bad Request';
-        }
-        else if($code == 401) {
-            //401 — Unauthorized — The request requires an user authentication
-            $errorTitle = 'Unauthorized';
-        }
-        else if($code == 403) {
-            //403 — Forbidden — The server understood the request, but is refusing it or the access is not allowed.
-            $errorTitle = 'Forbidden';
-        }
-        else if($code == 404) {
-            //404 — Not found — There is no resource behind the URI.
-            $errorTitle = 'Not found';
-        }else if($code == 422) {
-            //422 — Unprocessable Entity — Should be used if the server cannot process the enitity, e.g. if an image cannot be formatted or mandatory fields are missing in the payload.
-            $errorTitle = 'Unprocessable Entity';
-        }
-        else if($code == 429) {
-            //429 — 429 Too Many Requests response status code indicates the user has sent too many requests in a given amount of time ("rate limiting").
-            $errorTitle = 'To many Request';
-        }
-        else if($code == 500) {
-            //500 — Internal Server Error — API developers should avoid this error. If an error occurs in the global catch blog, the stracktrace should be logged and not returned as response.
-            $errorTitle = 'Unprocessable Entity';
-        }
-        else {
-            $errorTitle = 'ERROR';
+        if (!method_exists(Log::class, $logType)) {
+            $logType = 'info';
         }
 
-        return $errorTitle;
+        Log::$logType($prefix, $response);
+    }
+
+    /**
+     * Map HTTP status code to a short human-readable title.
+     */
+    private function getErrorTitle(int $code): string
+    {
+        return match ($code) {
+            400 => 'Bad Request',
+            401 => 'Unauthorized',
+            403 => 'Forbidden',
+            404 => 'Not Found',
+            422 => 'Unprocessable Entity',
+            429 => 'Too Many Requests',
+            500 => 'Internal Server Error',
+            default => 'Error',
+        };
     }
 }
