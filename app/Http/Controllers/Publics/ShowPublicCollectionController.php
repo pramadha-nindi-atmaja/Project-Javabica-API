@@ -3,47 +3,54 @@
 namespace App\Http\Controllers\Publics;
 
 use App\Http\Controllers\BaseController;
-use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
-use App\Http\Requests\CategoryAndCollectionPublicRequest\CategoryPublicGetRequest;
 use App\Http\Requests\CategoryAndCollectionPublicRequest\CollectionPublicGetRequest;
 use App\Interfaces\TaxonomyInterface;
 
 class ShowPublicCollectionController extends BaseController
 {
-    private $taxonomyInterface;
+    protected TaxonomyInterface $taxonomyInterface;
 
     public function __construct(TaxonomyInterface $taxonomyInterface)
     {
-        $this->taxonomyInterface            = $taxonomyInterface;
-     
+        $this->taxonomyInterface = $taxonomyInterface;
     }
-     /**
+
+    /**
+     * Display public collections.
+     *
      * @lrd:start
-     * # keyword untuk pencarian akan mencari :  taxonomy name dan atau taxonomy slug dan atau taxonomy parent dan atau taxonomy type
-     *
-     *
+     * # Search keywords will match: taxonomy name, taxonomy slug, taxonomy parent, or taxonomy type.
      * @lrd:end
      */
-    public function show(CollectionPublicGetRequest $request) {
+    public function show(CollectionPublicGetRequest $request)
+    {
+        $selectedColumns = ['*'];
 
-           
-       
-            $selectedColumn = array('*');
+        $result = $this->taxonomyInterface->show($request, $selectedColumns);
 
-             $getTaxonomy = $this->taxonomyInterface->show($request,$selectedColumn);
-        
-        if($getTaxonomy['queryStatus']) {
-            
-            return $this->handleResponse( $getTaxonomy['queryResponse'],'get collection success',$request->all(),str_replace('/','.',$request->path()),201);
+        if ($result['queryStatus']) {
+            return $this->handleResponse(
+                $result['queryResponse'],
+                'Get collection success',
+                $request->validated(),
+                str_replace('/', '.', $request->path()),
+                200
+            );
         }
 
-        $data  = array([
-            'field' =>'show-user',
-            'message'=> 'error when show collection'
-        ]);
+        $errorData = [
+            [
+                'field' => 'show-collection',
+                'message' => 'Error while fetching collection data',
+            ],
+        ];
 
-        return   $this->handleError( $data,$getTaxonomy['queryMessage'],$request->all(),str_replace('/','.',$request->path()),422);
-
+        return $this->handleError(
+            $errorData,
+            $result['queryMessage'] ?? 'Unknown error',
+            $request->validated(),
+            str_replace('/', '.', $request->path()),
+            422
+        );
     }
 }
